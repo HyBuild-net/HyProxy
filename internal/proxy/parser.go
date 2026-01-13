@@ -11,6 +11,7 @@ import (
 	"golang.org/x/crypto/hkdf"
 	"io"
 
+	"hyproxy/internal/debug"
 	"hyproxy/internal/handler"
 )
 
@@ -649,21 +650,27 @@ func parseTLSClientHello(data []byte) (*handler.ClientHello, error) {
 	}
 
 	extEnd := offset + extensionsLen
+	debug.Printf(" parsing extensions: len=%d, extEnd=%d, dataLen=%d", extensionsLen, extEnd, len(data))
 	for offset < extEnd && offset+4 <= len(data) {
 		extType := int(data[offset])<<8 | int(data[offset+1])
 		offset += 2
 		extLen := int(data[offset])<<8 | int(data[offset+1])
 		offset += 2
 
+		debug.Printf(" extension type=0x%04x len=%d", extType, extLen)
+
 		if offset+extLen > len(data) {
+			debug.Printf(" extension truncated: offset=%d extLen=%d dataLen=%d", offset, extLen, len(data))
 			break
 		}
 
 		switch extType {
 		case 0x00: // SNI
 			hello.SNI = parseSNI(data[offset : offset+extLen])
+			debug.Printf(" parsed SNI=%q", hello.SNI)
 		case 0x10: // ALPN
 			hello.ALPNProtocols = parseALPN(data[offset : offset+extLen])
+			debug.Printf(" parsed ALPN=%v", hello.ALPNProtocols)
 		}
 
 		offset += extLen

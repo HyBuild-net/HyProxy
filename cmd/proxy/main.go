@@ -8,13 +8,19 @@ import (
 	"strings"
 	"syscall"
 
+	"hyproxy/internal/debug"
 	"hyproxy/internal/handler"
 	"hyproxy/internal/proxy"
 )
 
 func main() {
 	configFlag := flag.String("config", "", "Config file path or JSON string")
+	debugFlag := flag.Bool("d", false, "Enable debug logging")
 	flag.Parse()
+
+	if *debugFlag {
+		debug.Enable()
+	}
 
 	if *configFlag == "" {
 		log.Fatal("-config is required")

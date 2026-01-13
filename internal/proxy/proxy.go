@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"hyproxy/internal/debug"
 	"hyproxy/internal/handler"
 )
 
@@ -322,7 +323,11 @@ func (p *Proxy) Run() error {
 // Uses QUIC Connection ID (DCID) for session lookup instead of IP:Port.
 // This enables Connection Migration (RFC 9000 Section 9).
 func (p *Proxy) handlePacket(clientAddr *net.UDPAddr, packet []byte) {
+	// DEBUG: Log packet reception
+	debug.Printf(" received %d bytes from %s, first byte: 0x%02x", len(packet), clientAddr, packet[0])
+
 	pktType := ClassifyPacket(packet)
+	debug.Printf(" packet type: %s", pktType)
 
 	// 1. Try to find existing session by DCID
 	ctx, dcid := p.findSession(packet, pktType)
@@ -376,7 +381,10 @@ func (p *Proxy) handlePacket(clientAddr *net.UDPAddr, packet []byte) {
 
 	// Extract and add CRYPTO frames from this packet
 	frames, err := ExtractCryptoFramesFromPacket(packet)
-	if err == nil {
+	if err != nil {
+		debug.Printf(" CRYPTO extraction failed: %v", err)
+	} else {
+		debug.Printf(" extracted %d CRYPTO frames", len(frames))
 		for _, f := range frames {
 			assembler.AddFrame(f.Offset, f.Data)
 		}
@@ -385,8 +393,10 @@ func (p *Proxy) handlePacket(clientAddr *net.UDPAddr, packet []byte) {
 	// Try to parse ClientHello from assembled data
 	hello := assembler.TryParse()
 	if hello == nil {
+		debug.Printf(" TryParse returned nil (not enough data yet)")
 		return
 	}
+	debug.Printf(" parsed ClientHello: SNI=%q ALPN=%v", hello.SNI, hello.ALPNProtocols)
 
 	// Clean up assembler
 	p.assemblers.Delete(dcidKey)

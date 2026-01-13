@@ -1,14 +1,11 @@
 {
-  "listen": ":5520",
+  "listen": "127.0.0.1:5520",
   "handlers": [
     {"type": "logsni"},
     {
-      "type": "sni-router",
+      "type": "simple-router",
       "config": {
-        "routes": {
-          "play.example.com": "127.0.0.1:5521",
-          "lobby.example.com": "127.0.0.1:5522"
-        }
+        "backend": "hybuild.net:5520"
       }
     },
     {"type": "forwarder"}
