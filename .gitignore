@@ -1,0 +1,6 @@
+bin/
+.idea/
+CONSTITUTION.md
+*.pem
+*.key
+*.crt
