@@ -7,43 +7,17 @@ A reverse proxy for Hytale servers. Route players to different backends based on
 ## Quickstart
 
 **Docker:**
- ```bash
-podman run -p 5520:5520/udp -e HYPROXY_BACKEND=your-server:5520 ghcr.io/hybuild-net/hyproxy
-```
-
 ```bash
 docker run -p 5520:5520/udp -e HYPROXY_BACKEND=your-server:5520 ghcr.io/hybuild-net/hyproxy
 ```
 
-Or mount your config:
- ```bash
-docker run ... -v /path/to/config:/data ...
-```
-
-### Signals
-
-| Signal | Effect |
-|--------|--------|
-| `SIGHUP` | Reload config (only when using a file) |
-| `SIGINT` | Shutdown |
-
-## Installation (Linux)
-
+**Linux:**
 ```bash
 curl -sSL https://raw.githubusercontent.com/HyBuild-net/HyProxy/master/dist/install.sh | sudo bash
+sudo systemctl enable --now hyproxy
 ```
 
-After installation:
-1. Edit `/etc/hyproxy/config.json`
-2. Set `HYPROXY_BACKEND` or configure routes
-3. `sudo systemctl start hyproxy`
-
-| Command | Effect |
-|---------|--------|
-| `systemctl status hyproxy` | Show status |
-| `systemctl reload hyproxy` | Reload config (no downtime) |
-| `systemctl restart hyproxy` | Full restart |
-| `journalctl -u hyproxy -f` | View logs |
+Configure via `/etc/hyproxy/config.json` or `HYPROXY_BACKEND` env. Reload with `systemctl reload hyproxy`.
 
 ## Handlers
 
