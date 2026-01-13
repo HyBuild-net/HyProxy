@@ -36,6 +36,7 @@ docker run -p 5520:5520/udp -v /path/to/config.json:/data/config.json ghcr.io/hy
 ## Handlers
 
 Handlers form a chain. Each handler processes the connection and either passes it to the next handler (`Continue`), handles it (`Handled`), or drops it (`Drop`).
+Custom handlers can be implemented quite easily, but the project needs to be recompiled.
 
 ### sni-router
 
@@ -59,6 +60,8 @@ Routes connections to different backends based on SNI. Each route can be a singl
   ]
 }
 ```
+[?] Why do we need the `{"type": "forwarder"}` here? The forwarding logic is implemented as a handler itself, this way we can easily replace the forwarding logic with some kind of
+terminating-logic, which can read the Hytale-Protocol itself and is capable to dig deeper into the game logic rather than just proxy traffic through. 
 
 ### simple-router
 
@@ -115,3 +118,5 @@ Produces `bin/proxy`.
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
+
+[!] This project is neither related to nor affiliated with HYPIXEL STUDIOS CANADA INC. or any other Trademark owner of Hytale. 
