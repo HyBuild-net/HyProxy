@@ -27,6 +27,24 @@ docker run ... -v /path/to/config:/data ...
 | `SIGHUP` | Reload config (only when using a file) |
 | `SIGINT` | Shutdown |
 
+## Installation (Linux)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/HyBuild-net/HyProxy/master/dist/install.sh | sudo bash
+```
+
+After installation:
+1. Edit `/etc/hyproxy/config.json`
+2. Set `HYPROXY_BACKEND` or configure routes
+3. `sudo systemctl start hyproxy`
+
+| Command | Effect |
+|---------|--------|
+| `systemctl status hyproxy` | Show status |
+| `systemctl reload hyproxy` | Reload config (no downtime) |
+| `systemctl restart hyproxy` | Full restart |
+| `journalctl -u hyproxy -f` | View logs |
+
 ## Handlers
 
 Handlers form a chain. Each handler processes the connection and either passes it to the next handler (`Continue`), handles it (`Handled`), or drops it (`Drop`).

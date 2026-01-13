@@ -1,0 +1,26 @@
+[Unit]
+Description=HyProxy - Hytale QUIC Reverse Proxy
+Documentation=https://github.com/HyBuild-net/HyProxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hyproxy
+Group=hyproxy
+ExecStart=/usr/local/bin/hyproxy -config /etc/hyproxy/config.json
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65535
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/
+ReadWritePaths=/var/log
+
+[Install]
+WantedBy=multi-user.target
