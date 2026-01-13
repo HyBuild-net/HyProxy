@@ -8,7 +8,7 @@
 
 A reverse proxy for Hytale servers. Route players to different Hytale-Servers based on the domain they connect to.
 According to Hytale's official server guide the "Minecraft"-like SRV implementation is not yet available ([source](https://support.hytale.com/hc/en-us/articles/45326769420827-Hytale-Server-Manual#:~:text=ecosystem-,SRV,exists)). 
-and therefore a QUIC-Proxy might be the only convinent way for archiving standartport + multiple servers. 
+And therefore a QUIC-Proxy might be the only convenient way for achieving standard port + multiple servers. 
 ## Quickstart
 
 ```bash
