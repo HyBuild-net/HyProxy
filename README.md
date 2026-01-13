@@ -6,8 +6,9 @@
 
 [![CI](https://github.com/HyBuild-net/HyProxy/actions/workflows/ci.yml/badge.svg)](https://github.com/HyBuild-net/HyProxy/actions/workflows/ci.yml)
 
-A reverse proxy for Hytale servers. Route players to different backends based on the domain they connect to, enabling multiple servers behind a single IP address.
-
+A reverse proxy for Hytale servers. Route players to different Hytale-Servers based on the domain they connect to.
+According to Hytale's official server guide the "Minecraft"-like SRV implementation is not yet available ([source](https://support.hytale.com/hc/en-us/articles/45326769420827-Hytale-Server-Manual#:~:text=ecosystem-,SRV,exists)). 
+and therefore a QUIC-Proxy might be the only convinent way for archiving standartport + multiple servers. 
 ## Quickstart
 
 ```bash
