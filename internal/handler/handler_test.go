@@ -3,6 +3,7 @@ package handler
 import (
 	"net"
 	"testing"
+	"time"
 )
 
 // mockHandler is a test handler that records calls.
@@ -175,6 +176,9 @@ func TestContext_SetGet(t *testing.T) {
 }
 
 func TestSession_Touch(t *testing.T) {
+	// Initialize coarse clock for test
+	coarseTime.Store(time.Now().Unix())
+
 	session := &Session{
 		ID: 1,
 	}
@@ -188,6 +192,9 @@ func TestSession_Touch(t *testing.T) {
 }
 
 func TestSession_IdleDuration(t *testing.T) {
+	// Initialize coarse clock for test
+	coarseTime.Store(time.Now().Unix())
+
 	session := &Session{
 		ID: 1,
 	}

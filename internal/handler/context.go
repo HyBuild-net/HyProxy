@@ -1,11 +1,35 @@
 package handler
 
 import (
+	"context"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+// coarseTime holds a Unix timestamp updated once per second.
+// Used by Touch() to avoid syscalls on every packet.
+var coarseTime atomic.Int64
+
+// StartCoarseClock starts a background goroutine that updates coarseTime every second.
+// Call this once at startup before processing packets.
+// The goroutine stops when ctx is cancelled.
+func StartCoarseClock(ctx context.Context) {
+	coarseTime.Store(time.Now().Unix()) // Initialize immediately
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				coarseTime.Store(time.Now().Unix())
+			}
+		}
+	}()
+}
 
 // ClientHello contains parsed TLS ClientHello data from QUIC Initial packet.
 type ClientHello struct {
@@ -31,9 +55,10 @@ type Session struct {
 }
 
 // Touch updates the last activity timestamp atomically.
+// Uses coarse clock (1-second resolution) to avoid syscalls on every packet.
 // Safe to call from multiple goroutines.
 func (s *Session) Touch() {
-	s.LastActivity.Store(time.Now().Unix())
+	s.LastActivity.Store(coarseTime.Load())
 }
 
 // IdleDuration returns time since last activity.

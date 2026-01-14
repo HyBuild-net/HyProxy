@@ -264,6 +264,9 @@ func (p *Proxy) ReloadChain(chain *handler.Chain) {
 
 // Run starts the proxy server.
 func (p *Proxy) Run() error {
+	// Start coarse clock for efficient session activity tracking
+	handler.StartCoarseClock(p.ctx)
+
 	addr, err := net.ResolveUDPAddr("udp", p.listenAddr)
 	if err != nil {
 		return fmt.Errorf("failed to resolve address: %w", err)
