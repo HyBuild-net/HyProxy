@@ -113,6 +113,7 @@ Logs the SNI of each connection. Useful for debugging.
 
 Environment variables as fallback when not set in config:
 - `QUIC_RELAY_LISTEN` - Listen address (default: `:5520`)
+- `QUIC_RELAY_BACKEND` - Backend address for `simple-router`
 
 ## Build
 
