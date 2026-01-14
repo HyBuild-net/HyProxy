@@ -84,6 +84,7 @@ install_config() {
 {
   "listen": ":5520",
   "handlers": [
+    {"type": "ratelimit-global", "config": {"max_parallel_connections": 10000}},
     {"type": "logsni"},
     {
       "type": "sni-router",
