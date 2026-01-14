@@ -67,10 +67,23 @@ const (
 	assemblerTimeout    = 5 * time.Second          // Clean up incomplete assemblers after 5s
 
 	// Bounds for maps to prevent unbounded memory growth
-	maxSessions     = 100000
-	maxAssemblers   = 50000
-	cleanupInterval = 30 * time.Second
+	maxSessions       = 100000
+	maxAssemblers     = 50000
+	maxPendingPerDCID = 10 // Max buffered packets per DCID
+	cleanupInterval   = 30 * time.Second
 )
+
+// pendingPacket holds a packet that arrived before its session was created.
+type pendingPacket struct {
+	data []byte
+}
+
+// pendingBuffer holds packets waiting for session creation.
+type pendingBuffer struct {
+	packets   []pendingPacket
+	createdAt time.Time
+	mu        sync.Mutex
+}
 
 // NewCryptoAssembler creates a new assembler with pre-allocated buffer
 func NewCryptoAssembler() *CryptoAssembler {
@@ -235,6 +248,7 @@ type Proxy struct {
 	sessions       sync.Map                      // DCID (string) -> *handler.Context
 	sessionCount   atomic.Int64                  // O(1) session counter
 	assemblers     sync.Map                      // DCID (string) -> *CryptoAssembler
+	pendingPackets sync.Map                      // DCID (string) -> *pendingBuffer (out-of-order packets)
 	dcidAliases    sync.Map                      // Server SCID (string) -> original DCID (string)
 	workerPool     *WorkerPool
 	ctx            context.Context
@@ -368,6 +382,15 @@ func (p *Proxy) handlePacket(clientAddr *net.UDPAddr, packet []byte) {
 
 	// 2. No session found - only Initial packets can create new sessions
 	if pktType != PacketInitial {
+		// Buffer 0-RTT and Handshake packets that arrived before Initial
+		if pktType == PacketZeroRTT || pktType == PacketHandshake {
+			if dcid == nil {
+				dcid, _ = ExtractDCID(packet, 0)
+			}
+			if dcid != nil {
+				p.bufferPendingPacket(string(dcid), packet)
+			}
+		}
 		return
 	}
 
@@ -456,6 +479,9 @@ func (p *Proxy) handlePacket(clientAddr *net.UDPAddr, packet []byte) {
 
 		// Store session by DCID
 		p.storeSession(dcidKey, newCtx)
+
+		// Flush any packets that arrived before this Initial (out-of-order)
+		p.flushPendingPackets(dcidKey, newCtx)
 
 		// Set DropSession callback for immediate session termination by handlers
 		newCtx.DropSession = func() {
@@ -639,6 +665,15 @@ func (p *Proxy) cleanupSessions() {
 					return true
 				})
 			}
+
+			// Cleanup expired pending packet buffers
+			p.pendingPackets.Range(func(key, value any) bool {
+				buf := value.(*pendingBuffer)
+				if time.Since(buf.createdAt) > assemblerTimeout {
+					p.pendingPackets.Delete(key)
+				}
+				return true
+			})
 		}
 	}
 }
@@ -684,6 +719,44 @@ func (p *Proxy) storeSession(key string, ctx *handler.Context) {
 	}
 
 	p.sessions.Store(key, ctx)
+}
+
+// bufferPendingPacket stores a packet that arrived before its session existed.
+// Used for out-of-order 0-RTT and Handshake packets.
+func (p *Proxy) bufferPendingPacket(dcidKey string, packet []byte) {
+	val, _ := p.pendingPackets.LoadOrStore(dcidKey, &pendingBuffer{
+		createdAt: time.Now(),
+	})
+	buf := val.(*pendingBuffer)
+
+	buf.mu.Lock()
+	defer buf.mu.Unlock()
+
+	if len(buf.packets) >= maxPendingPerDCID {
+		return
+	}
+
+	pktCopy := make([]byte, len(packet))
+	copy(pktCopy, packet)
+	buf.packets = append(buf.packets, pendingPacket{data: pktCopy})
+}
+
+// flushPendingPackets processes buffered packets after session creation.
+func (p *Proxy) flushPendingPackets(dcidKey string, ctx *handler.Context) {
+	val, ok := p.pendingPackets.LoadAndDelete(dcidKey)
+	if !ok {
+		return
+	}
+
+	buf := val.(*pendingBuffer)
+	buf.mu.Lock()
+	packets := buf.packets
+	buf.packets = nil
+	buf.mu.Unlock()
+
+	for _, pkt := range packets {
+		p.chain.Load().OnPacket(ctx, pkt.data, handler.Inbound)
+	}
 }
 
 // sessionAge represents a session with its idle time for cleanup priority.
