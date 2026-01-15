@@ -645,7 +645,7 @@ func (p *Proxy) learnServerSCID(originalDCID string, ctx *handler.Context, datag
 		// Track SCID length for Short Header parsing
 		p.registerDCIDLength(len(scid))
 
-		log.Printf("[proxy] learned server SCID=%x for session (original DCID=%s)", scid, originalDCID[:min(8, len(originalDCID))])
+		log.Printf("[proxy] learned server SCID=%x for session (original DCID=%x)", scid, []byte(originalDCID)[:min(8, len(originalDCID))])
 	}
 }
 
