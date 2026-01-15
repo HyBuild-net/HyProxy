@@ -69,10 +69,9 @@ Routes connections to different backends based on SNI. Each route can be a singl
   ]
 }
 ```
-[?] Why do we need the `{"type": "forwarder"}` here? The forwarding logic is implemented as a handler itself, this way we can easily replace the forwarding logic with some kind of
-terminating-logic, which can read the Hytale-Protocol itself and is capable to dig deeper into the game logic rather than just proxy traffic through.
+[?] Why do we need the `{"type": "forwarder"}` here? The forwarding logic is implemented as a handler itself, this way we can easily replace the forwarding logic with some kind of terminating-logic, which can read the Hytale-Protocol itself and is capable to dig deeper into the game logic rather than just proxy traffic through.
 
-> **Edit:** Unfortunately the termination is more complicated. Both the client and the server validate each other's JWT, so MITM/terminating/reading proxies aren't possible. The only way it might work is in `offline-mode`, but that opens the door for identity faking/fake operators and is not recommended. You can look into the `dev` branch for the experimental stuff.
+> **Edit:** Termination is possible using the [terminator](#terminator) handler with custom certificates. Clients need the [HytaleCustomCert](https://hybuildnet.github.io/HytaleCustomCert/) plugin to disable certificate binding validation.
 
 ### simple-router
 
