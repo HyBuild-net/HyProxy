@@ -1,20 +1,16 @@
 package handler
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"log"
-	"strings"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/klauspost/compress/zstd"
 	"github.com/quic-go/quic-go"
 	"quic-relay/internal/debug"
 )
@@ -38,23 +34,18 @@ type TerminatorConfig struct {
 	MaxPacketSize     int `json:"max_packet_size"`     // Skip packets larger than this (0 = no limit, default 1MB)
 }
 
-// backendEntry tracks a backend address with reference counting.
-// Multiple connections with the same SNI share the same entry.
-type backendEntry struct {
-	addr     string
-	refCount atomic.Int32
-}
-
 // TerminatorHandler terminates QUIC connections and bridges them to backends.
-// It runs an internal quic.Listener and uses the transparent proxy as a frontend.
+// It runs an internal QUIC listener and uses the transparent proxy as a frontend.
 type TerminatorHandler struct {
 	config       TerminatorConfig
+	transport    *quic.Transport
 	listener     *quic.Listener
+	tracker      *dcidTracker
 	internalAddr string
 	clientCert   *tls.Certificate // Client certificate for backend mTLS
 
-	// SNI → *backendEntry mapping (set by OnConnect, read by internal listener)
-	backends sync.Map
+	// DCID → backend mapping (set by OnConnect, read by handleConnection)
+	backends sync.Map // dcid (hex string) → backend address (string)
 
 	// Session tracking
 	sessionCount atomic.Int64
@@ -99,21 +90,40 @@ func NewTerminatorHandler(raw json.RawMessage) (Handler, error) {
 		},
 	}
 
-	// Start internal listener
+	// Setup internal listener address
 	addr := cfg.Listen
 	if addr == "auto" || addr == "" {
 		addr = "localhost:0" // Ephemeral port
 	}
 
-	listener, err := quic.ListenAddr(addr, tlsConfig, &quic.Config{
-		MaxIdleTimeout: 30 * time.Second,
-	})
+	// Create UDP listener
+	udpAddr, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
 		return nil, err
 	}
 
+	udpConn, err := net.ListenUDP("udp", udpAddr)
+	if err != nil {
+		return nil, err
+	}
+
+	// Wrap with DCID tracker
+	h.tracker = newDCIDTracker(udpConn)
+
+	// Create QUIC transport with our tracked connection
+	h.transport = &quic.Transport{Conn: h.tracker}
+
+	// Start QUIC listener on transport
+	listener, err := h.transport.Listen(tlsConfig, &quic.Config{
+		MaxIdleTimeout: 30 * time.Second,
+	})
+	if err != nil {
+		h.tracker.Close()
+		return nil, err
+	}
+
 	h.listener = listener
-	h.internalAddr = listener.Addr().String()
+	h.internalAddr = udpConn.LocalAddr().String()
 
 	log.Printf("[terminator] internal listener on %s", h.internalAddr)
 
@@ -129,31 +139,30 @@ func (h *TerminatorHandler) Name() string {
 	return "terminator"
 }
 
-// OnConnect stores backend mapping and redirects to internal listener.
+// OnConnect stores backend mapping by DCID and redirects to internal listener.
 func (h *TerminatorHandler) OnConnect(ctx *Context) Result {
-	sni := ctx.Hello.SNI
 	backend := ctx.GetString("backend")
-
-	if sni == "" || backend == "" {
-		return Result{Action: Drop, Error: errors.New("missing SNI or backend")}
+	if backend == "" {
+		return Result{Action: Drop, Error: errors.New("no backend")}
 	}
 
-	// Store or increment ref count for this SNI → backend mapping
-	entry, loaded := h.backends.LoadOrStore(sni, &backendEntry{addr: backend})
-	be := entry.(*backendEntry)
-	if loaded {
-		// Entry existed, just increment ref count
-		be.refCount.Add(1)
-	} else {
-		// New entry, set initial ref count
-		be.refCount.Store(1)
+	// Extract DCID from InitialPacket
+	dcid := parseQUICDCID(ctx.InitialPacket)
+	if dcid == "" {
+		return Result{Action: Drop, Error: errors.New("no DCID in packet")}
 	}
+
+	// Store backend by DCID (not SNI!)
+	h.backends.Store(dcid, backend)
+
+	sni := ""
+	if ctx.Hello != nil {
+		sni = ctx.Hello.SNI
+	}
+	log.Printf("[terminator] %s (dcid=%s) → %s (via %s)", sni, dcid[:8], backend, h.internalAddr)
 
 	// Redirect to internal listener
 	ctx.Set("backend", h.internalAddr)
-
-	log.Printf("[terminator] %s → %s (via %s)", sni, backend, h.internalAddr)
-
 	return Result{Action: Continue}
 }
 
@@ -162,17 +171,13 @@ func (h *TerminatorHandler) OnPacket(ctx *Context, packet []byte, dir Direction)
 	return Result{Action: Continue}
 }
 
-// OnDisconnect decrements backend reference count.
+// OnDisconnect cleans up backend mapping if connection didn't reach handleConnection.
 func (h *TerminatorHandler) OnDisconnect(ctx *Context) {
-	if ctx.Hello == nil {
-		return
-	}
-
-	sni := ctx.Hello.SNI
-	if entry, ok := h.backends.Load(sni); ok {
-		be := entry.(*backendEntry)
-		if be.refCount.Add(-1) <= 0 {
-			h.backends.Delete(sni)
+	// Clean up in case connection was dropped before handleConnection ran
+	if ctx.InitialPacket != nil {
+		dcid := parseQUICDCID(ctx.InitialPacket)
+		if dcid != "" {
+			h.backends.Delete(dcid)
 		}
 	}
 }
@@ -181,18 +186,17 @@ func (h *TerminatorHandler) OnDisconnect(ctx *Context) {
 func (h *TerminatorHandler) acceptLoop() {
 	defer h.wg.Done()
 
-	log.Printf("[terminator] accept loop started, waiting for connections...")
+	log.Printf("[terminator] accept loop started")
 
 	for {
-		debug.Printf(" terminator: calling Accept()...")
+		debug.Printf("[terminator] calling Accept()...")
 		conn, err := h.listener.Accept(h.ctx)
 		if err != nil {
-			// Context cancelled or listener closed
-			log.Printf("[terminator] accept error: %v", err)
+			log.Printf("[terminator] accept loop ended: %v", err)
 			return
 		}
 
-		log.Printf("[terminator] accepted connection from %s, TLS: %+v", conn.RemoteAddr(), conn.ConnectionState().TLS.ServerName)
+		debug.Printf("[terminator] accepted connection from %s", conn.RemoteAddr())
 		h.wg.Add(1)
 		go h.handleConnection(conn)
 	}
@@ -202,21 +206,35 @@ func (h *TerminatorHandler) acceptLoop() {
 func (h *TerminatorHandler) handleConnection(clientConn *quic.Conn) {
 	defer h.wg.Done()
 
-	// Get SNI and ALPN from TLS state
+	// Get DCID from tracker using remote address
+	remoteAddr := clientConn.RemoteAddr().String()
+	dcid := h.tracker.GetDCID(remoteAddr)
+	if dcid == "" {
+		log.Printf("[terminator] no DCID mapping for %s", remoteAddr)
+		clientConn.CloseWithError(0x01, "no dcid mapping")
+		return
+	}
+
+	// Lookup backend by DCID
+	entry, ok := h.backends.Load(dcid)
+	if !ok {
+		log.Printf("[terminator] no backend for DCID %s", dcid[:8])
+		clientConn.CloseWithError(0x01, "no backend")
+		h.tracker.Delete(remoteAddr)
+		return
+	}
+	backend := entry.(string)
+
+	// Cleanup mappings (one-time use)
+	h.tracker.Delete(remoteAddr)
+	h.backends.Delete(dcid)
+
+	// Get SNI and ALPN from TLS state for backend connection
 	tlsState := clientConn.ConnectionState().TLS
 	sni := tlsState.ServerName
 	alpn := tlsState.NegotiatedProtocol
 
-	// Lookup backend
-	entry, ok := h.backends.Load(sni)
-	if !ok {
-		log.Printf("[terminator] no backend for SNI %q", sni)
-		clientConn.CloseWithError(0x01, "no backend")
-		return
-	}
-	backend := entry.(*backendEntry).addr
-
-	// Dial backend with timeout, using same ALPN as client
+	// Dial backend with timeout
 	dialCtx, cancel := context.WithTimeout(h.ctx, 10*time.Second)
 	defer cancel()
 
@@ -259,7 +277,7 @@ func (h *TerminatorHandler) handleConnection(clientConn *quic.Conn) {
 	log.Printf("[terminator] session %d: %s ↔ %s (ALPN=%s)", sessionID, sni, backend, alpn)
 
 	// Bridge streams (blocks until session ends)
-	session.bridge(h.ctx)
+	session.bridge()
 
 	log.Printf("[terminator] session %d closed", sessionID)
 }
@@ -269,8 +287,11 @@ func (h *TerminatorHandler) Shutdown(ctx context.Context) error {
 	// Cancel context (stops accept loop)
 	h.cancel()
 
-	// Close listener (stops new connections)
+	// Close listener
 	h.listener.Close()
+
+	// Close transport (and underlying tracker/conn)
+	h.transport.Close()
 
 	// Close all sessions
 	h.sessions.Range(func(key, val any) bool {
@@ -290,312 +311,5 @@ func (h *TerminatorHandler) Shutdown(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
-	}
-}
-
-// terminatorSession represents a bridged connection between client and server.
-type terminatorSession struct {
-	clientConn *quic.Conn
-	serverConn *quic.Conn
-	ctx        context.Context
-	cancel     context.CancelFunc
-	closed     atomic.Bool
-	wg         sync.WaitGroup
-
-	// Per-direction logging config
-	logClientPackets  int
-	logServerPackets  int
-	skipClientPackets int
-	skipServerPackets int
-	maxPacketSize     int
-}
-
-// chunkLogger logs stream chunks without packet reconstruction.
-type chunkLogger struct {
-	prefix  string
-	logged  int
-	maxLog  int
-	skip    int
-	maxSize int
-}
-
-func (l *chunkLogger) log(data []byte) {
-	// Check limits
-	if l.logged >= l.maxLog {
-		return
-	}
-	if l.maxSize > 0 && len(data) > l.maxSize {
-		return
-	}
-	if l.skip > 0 {
-		l.skip--
-		return
-	}
-
-	l.logged++
-	l.logChunk(data)
-}
-
-func (l *chunkLogger) logChunk(data []byte) {
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%s chunk #%d (%d bytes)\n", l.prefix, l.logged, len(data)))
-
-	// Try zstd decode if magic at start
-	if bytes.HasPrefix(data, zstdMagic) {
-		if decoded, err := zstdDecoder.DecodeAll(data, nil); err == nil {
-			sb.WriteString(fmt.Sprintf("── zstd: %d → %d bytes ──\n", len(data), len(decoded)))
-			sb.WriteString(hexDumpLimit(decoded, maxHexDumpSize))
-			log.Print(sb.String())
-			return
-		}
-	}
-
-	sb.WriteString(hexDumpLimit(data, maxHexDumpSize))
-	log.Print(sb.String())
-}
-
-const maxHexDumpSize = 4096
-
-// hexDumpLimit formats bytes as hex + ASCII with a size limit.
-func hexDumpLimit(data []byte, maxLen int) string {
-	if len(data) > maxLen {
-		return hexDump(data[:maxLen]) + fmt.Sprintf("... (%d more bytes)\n", len(data)-maxLen)
-	}
-	return hexDump(data)
-}
-
-func newTerminatorSession(client, server *quic.Conn, cfg *TerminatorConfig) *terminatorSession {
-	ctx, cancel := context.WithCancel(context.Background())
-	maxPktSize := cfg.MaxPacketSize
-	if maxPktSize == 0 {
-		maxPktSize = 1024 * 1024 // Default 1MB
-	}
-	return &terminatorSession{
-		clientConn:        client,
-		serverConn:        server,
-		ctx:               ctx,
-		cancel:            cancel,
-		logClientPackets:  cfg.LogClientPackets,
-		logServerPackets:  cfg.LogServerPackets,
-		skipClientPackets: cfg.SkipClientPackets,
-		skipServerPackets: cfg.SkipServerPackets,
-		maxPacketSize:     maxPktSize,
-	}
-}
-
-func (s *terminatorSession) bridge(parentCtx context.Context) {
-	// Monitor for connection close from either side
-	go func() {
-		select {
-		case <-s.clientConn.Context().Done():
-		case <-s.serverConn.Context().Done():
-		case <-parentCtx.Done():
-		}
-		s.Close()
-	}()
-
-	// 4 goroutines for all stream types:
-	// 1. Client → Server (bidirectional)
-	// 2. Server → Client (bidirectional)
-	// 3. Client → Server (unidirectional)
-	// 4. Server → Client (unidirectional)
-
-	s.wg.Add(4)
-	go s.bridgeBidirectional(s.clientConn, s.serverConn, true)        // Client-initiated
-	go s.bridgeBidirectional(s.serverConn, s.clientConn, false)       // Server-initiated
-	go s.bridgeUnidirectional(s.clientConn, s.serverConn, "[client]") // Client → Server
-	go s.bridgeUnidirectional(s.serverConn, s.clientConn, "[server]") // Server → Client
-
-	s.wg.Wait()
-}
-
-func (s *terminatorSession) bridgeBidirectional(src, dst *quic.Conn, srcIsClient bool) {
-	defer s.wg.Done()
-
-	debug.Printf(" bridgeBidirectional: waiting for streams from %s", src.RemoteAddr())
-
-	for {
-		srcStream, err := src.AcceptStream(s.ctx)
-		if err != nil {
-			debug.Printf(" bridgeBidirectional: AcceptStream error: %v", err)
-			return // Connection closed
-		}
-
-		debug.Printf(" bridgeBidirectional: accepted stream %d from %s", srcStream.StreamID(), src.RemoteAddr())
-
-		dstStream, err := dst.OpenStream()
-		if err != nil {
-			debug.Printf(" bridgeBidirectional: OpenStream error: %v", err)
-			srcStream.Close()
-			return
-		}
-
-		debug.Printf(" bridgeBidirectional: opened stream %d to %s", dstStream.StreamID(), dst.RemoteAddr())
-
-		s.wg.Add(1)
-		go s.copyBidirectionalStream(srcStream, dstStream, srcIsClient)
-	}
-}
-
-func (s *terminatorSession) bridgeUnidirectional(src, dst *quic.Conn, prefix string) {
-	defer s.wg.Done()
-
-	for {
-		srcStream, err := src.AcceptUniStream(s.ctx)
-		if err != nil {
-			return // Connection closed
-		}
-
-		dstStream, err := dst.OpenUniStream()
-		if err != nil {
-			srcStream.CancelRead(0)
-			return
-		}
-
-		s.wg.Add(1)
-		go s.copyUnidirectionalStream(srcStream, dstStream, prefix)
-	}
-}
-
-func (s *terminatorSession) copyBidirectionalStream(src, dst *quic.Stream, srcIsClient bool) {
-	defer s.wg.Done()
-	defer src.Close()
-	defer dst.Close()
-
-	debug.Printf(" copyBidirectionalStream: bridging stream %d <-> %d", src.StreamID(), dst.StreamID())
-
-	srcPrefix := "[server]"
-	dstPrefix := "[client]"
-	if srcIsClient {
-		srcPrefix = "[client]"
-		dstPrefix = "[server]"
-	}
-
-	done := make(chan struct{}, 2)
-
-	// src → dst
-	go func() {
-		n, err := s.copyWithLog(dst, src, srcPrefix)
-		debug.Printf(" stream %d -> %d: copied %d bytes, err=%v", src.StreamID(), dst.StreamID(), n, err)
-		dst.Close() // Signal write-end closed (sends FIN)
-		done <- struct{}{}
-	}()
-
-	// dst → src
-	go func() {
-		n, err := s.copyWithLog(src, dst, dstPrefix)
-		debug.Printf(" stream %d -> %d: copied %d bytes, err=%v", dst.StreamID(), src.StreamID(), n, err)
-		src.Close()
-		done <- struct{}{}
-	}()
-
-	// Wait for both or session close
-	select {
-	case <-done:
-		<-done
-	case <-s.ctx.Done():
-		debug.Printf(" copyBidirectionalStream: context cancelled")
-	}
-}
-
-func (s *terminatorSession) copyUnidirectionalStream(src *quic.ReceiveStream, dst *quic.SendStream, prefix string) {
-	defer s.wg.Done()
-	defer dst.Close()
-
-	s.copyWithLog(dst, src, prefix)
-}
-
-// zstd magic number: 0xFD2FB528
-var zstdMagic = []byte{0x28, 0xB5, 0x2F, 0xFD}
-
-// Shared zstd decoder (thread-safe, reusable)
-var zstdDecoder, _ = zstd.NewReader(nil)
-
-// copyWithLog copies data from src to dst while logging chunks per direction.
-func (s *terminatorSession) copyWithLog(dst io.Writer, src io.Reader, prefix string) (int64, error) {
-	// Fast path: debug mode disabled, just copy
-	if !debug.IsEnabled() {
-		return io.Copy(dst, src)
-	}
-
-	var maxLog, skip int
-	if prefix == "[client]" {
-		maxLog = s.logClientPackets
-		skip = s.skipClientPackets
-	} else {
-		maxLog = s.logServerPackets
-		skip = s.skipServerPackets
-	}
-
-	// No logging configured for this direction
-	if maxLog <= 0 {
-		return io.Copy(dst, src)
-	}
-
-	// Logging enabled - use chunk logger
-	logger := &chunkLogger{
-		prefix:  prefix,
-		maxLog:  maxLog,
-		skip:    skip,
-		maxSize: s.maxPacketSize,
-	}
-
-	buf := make([]byte, 32*1024)
-	var total int64
-
-	for {
-		n, err := src.Read(buf)
-		if n > 0 {
-			logger.log(buf[:n])
-			nw, werr := dst.Write(buf[:n])
-			total += int64(nw)
-			if werr != nil {
-				return total, werr
-			}
-		}
-		if err != nil {
-			if err == io.EOF {
-				return total, nil
-			}
-			return total, err
-		}
-	}
-}
-
-// hexDump formats bytes as hex + ASCII.
-func hexDump(data []byte) string {
-	var sb strings.Builder
-	for i := 0; i < len(data); i += 16 {
-		sb.WriteString(fmt.Sprintf("%04x  ", i))
-		for j := 0; j < 16; j++ {
-			if i+j < len(data) {
-				sb.WriteString(fmt.Sprintf("%02x ", data[i+j]))
-			} else {
-				sb.WriteString("   ")
-			}
-			if j == 7 {
-				sb.WriteByte(' ')
-			}
-		}
-		sb.WriteString(" |")
-		for j := 0; j < 16 && i+j < len(data); j++ {
-			b := data[i+j]
-			if b >= 32 && b <= 126 {
-				sb.WriteByte(b)
-			} else {
-				sb.WriteByte('.')
-			}
-		}
-		sb.WriteString("|\n")
-	}
-	return sb.String()
-}
-
-// Close closes the session and both connections.
-func (s *terminatorSession) Close() {
-	if !s.closed.Swap(true) {
-		s.cancel()
-		s.clientConn.CloseWithError(0, "session closed")
-		s.serverConn.CloseWithError(0, "session closed")
 	}
 }
