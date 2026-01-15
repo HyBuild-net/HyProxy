@@ -703,20 +703,35 @@ var zstdDecoder, _ = zstd.NewReader(nil)
 
 // copyWithLog copies data from src to dst while logging packets per direction.
 func (s *terminatorSession) copyWithLog(dst io.Writer, src io.Reader, prefix string) (int64, error) {
+	// Fast path: debug mode disabled, just copy
+	if !debug.IsEnabled() {
+		return io.Copy(dst, src)
+	}
+
+	var maxPackets, skipPackets int
+
+	if prefix == "[client]" {
+		maxPackets = s.logClientPackets
+		skipPackets = s.skipClientPackets
+	} else {
+		maxPackets = s.logServerPackets
+		skipPackets = s.skipServerPackets
+	}
+
+	// No logging configured for this direction
+	if maxPackets <= 0 {
+		return io.Copy(dst, src)
+	}
+
+	// Logging enabled - use buffered logger
 	buf := make([]byte, 32*1024)
 	var total int64
 
 	var counter *atomic.Int32
-	var maxPackets, skipPackets int
-
 	if prefix == "[client]" {
 		counter = &s.clientPackets
-		maxPackets = s.logClientPackets
-		skipPackets = s.skipClientPackets
 	} else {
 		counter = &s.serverPackets
-		maxPackets = s.logServerPackets
-		skipPackets = s.skipServerPackets
 	}
 
 	logger := newStreamLogger(prefix, counter, maxPackets, skipPackets, s.maxPacketSize)
