@@ -159,7 +159,11 @@ func (h *TerminatorHandler) OnConnect(ctx *Context) Result {
 	if ctx.Hello != nil {
 		sni = ctx.Hello.SNI
 	}
-	log.Printf("[terminator] %s (dcid=%s) → %s (via %s)", sni, dcid[:8], backend, h.internalAddr)
+	dcidShort := dcid
+	if len(dcid) > 8 {
+		dcidShort = dcid[:8]
+	}
+	log.Printf("[terminator] %s (dcid=%s) → %s (via %s)", sni, dcidShort, backend, h.internalAddr)
 
 	// Redirect to internal listener
 	ctx.Set("backend", h.internalAddr)
@@ -218,7 +222,11 @@ func (h *TerminatorHandler) handleConnection(clientConn *quic.Conn) {
 	// Lookup backend by DCID
 	entry, ok := h.backends.Load(dcid)
 	if !ok {
-		log.Printf("[terminator] no backend for DCID %s", dcid[:8])
+		dcidShort := dcid
+		if len(dcid) > 8 {
+			dcidShort = dcid[:8]
+		}
+		log.Printf("[terminator] no backend for DCID %s", dcidShort)
 		clientConn.CloseWithError(0x01, "no backend")
 		h.tracker.Delete(remoteAddr)
 		return

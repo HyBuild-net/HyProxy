@@ -7,12 +7,18 @@ import (
 	"time"
 )
 
+// dcidEntry holds a DCID with its creation timestamp.
+type dcidEntry struct {
+	dcid    string
+	created time.Time
+}
+
 // dcidTracker wraps a PacketConn to track QUIC DCID → remote address mappings.
 // Used to correlate connections between OnConnect and the internal listener.
 type dcidTracker struct {
 	net.PacketConn
 	mu     sync.RWMutex
-	byAddr map[string]string // remote_addr → dcid (hex encoded)
+	byAddr map[string]dcidEntry // remote_addr → dcid entry
 
 	ctx    chan struct{}
 	closed bool
@@ -21,7 +27,7 @@ type dcidTracker struct {
 func newDCIDTracker(conn net.PacketConn) *dcidTracker {
 	t := &dcidTracker{
 		PacketConn: conn,
-		byAddr:     make(map[string]string),
+		byAddr:     make(map[string]dcidEntry),
 		ctx:        make(chan struct{}),
 	}
 	go t.cleanupLoop()
@@ -38,7 +44,10 @@ func (t *dcidTracker) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
 			// Only store first DCID per address (don't overwrite)
 			// This is important because QUIC may change DCIDs during handshake
 			if _, exists := t.byAddr[addr.String()]; !exists {
-				t.byAddr[addr.String()] = dcid
+				t.byAddr[addr.String()] = dcidEntry{
+					dcid:    dcid,
+					created: time.Now(),
+				}
 			}
 			t.mu.Unlock()
 		}
@@ -50,7 +59,10 @@ func (t *dcidTracker) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
 func (t *dcidTracker) GetDCID(addr string) string {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	return t.byAddr[addr]
+	if entry, ok := t.byAddr[addr]; ok {
+		return entry.dcid
+	}
+	return ""
 }
 
 // Delete removes the mapping for a remote address.
@@ -72,15 +84,24 @@ func (t *dcidTracker) Close() error {
 }
 
 // cleanupLoop periodically removes stale entries (connections that never completed).
+// Entries older than 60 seconds are removed - this is more than enough for QUIC handshake.
 func (t *dcidTracker) cleanupLoop() {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
+
+	const maxAge = 60 * time.Second
 
 	for {
 		select {
 		case <-ticker.C:
-			// For now just a placeholder - in production you might want
-			// to track timestamps and remove old entries
+			t.mu.Lock()
+			now := time.Now()
+			for addr, entry := range t.byAddr {
+				if now.Sub(entry.created) > maxAge {
+					delete(t.byAddr, addr)
+				}
+			}
+			t.mu.Unlock()
 		case <-t.ctx:
 			return
 		}

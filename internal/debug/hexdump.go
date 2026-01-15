@@ -26,7 +26,7 @@ func LogChunk(prefix string, num int, data []byte) {
 	sb.WriteString(fmt.Sprintf("%s #%d (%d bytes)\n", prefix, num, len(data)))
 
 	// Try zstd decode if magic at start
-	if bytes.HasPrefix(data, zstdMagic) {
+	if zstdDecoder != nil && bytes.HasPrefix(data, zstdMagic) {
 		if decoded, err := zstdDecoder.DecodeAll(data, nil); err == nil {
 			sb.WriteString(fmt.Sprintf("── zstd: %d → %d bytes ──\n", len(data), len(decoded)))
 			sb.WriteString(HexDump(decoded))
