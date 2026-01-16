@@ -17,8 +17,7 @@
         "certs": {
           "default": {
             "cert": "server.crt",
-            "key": "server.key",
-            "backend_mtls": true
+            "key": "server.key"
           }
         },
         "log_client_packets": 0,
