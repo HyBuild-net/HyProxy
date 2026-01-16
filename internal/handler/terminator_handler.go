@@ -144,3 +144,9 @@ func (h *TerminatorHandler) OnDisconnect(ctx *Context) {
 func (h *TerminatorHandler) Shutdown(ctx context.Context) error {
 	return h.term.Close()
 }
+
+// AddPacketHandler registers a handler for decrypted Hytale protocol packets.
+// Handlers are executed in the order they are added.
+func (h *TerminatorHandler) AddPacketHandler(handler terminator.PacketHandler) {
+	h.term.AddPacketHandler(handler)
+}
