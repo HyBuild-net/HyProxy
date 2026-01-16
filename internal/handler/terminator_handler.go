@@ -15,9 +15,9 @@ func init() {
 
 // TerminatorCertConfig holds TLS config for a certificate.
 type TerminatorCertConfig struct {
-	Cert        string `json:"cert"`         // Path to TLS certificate
-	Key         string `json:"key"`          // Path to TLS private key
-	BackendMTLS bool   `json:"backend_mtls"` // Use cert as client cert for backend mTLS
+	Cert        string `json:"cert"`                   // Path to TLS certificate
+	Key         string `json:"key"`                    // Path to TLS private key
+	BackendMTLS *bool  `json:"backend_mtls,omitempty"` // Use cert as client cert for backend mTLS (default: true)
 }
 
 // TerminatorCertsConfig groups all certificate configurations.
