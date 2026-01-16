@@ -1,17 +1,17 @@
 ---
 layout: doc
-title: QUIC Relay - SNI-based Reverse Proxy for Hytale and QUIC
-description: Route multiple Hytale servers through a single IP and port using SNI-based routing. Open source QUIC reverse proxy with load balancing and rate limiting.
+title: QUIC Relay - Reverse Proxy for Hytale
+description: Route multiple Hytale servers through a single IP using SNI-based routing and TLS termination. Open source QUIC reverse proxy with load balancing.
 head:
   - - meta
     - name: keywords
       content: hytale, hytale server, hytale proxy, hytale reverse proxy, hytale multiple servers, quic, quic proxy, sni routing, udp proxy, load balancer
   - - meta
     - property: og:title
-      content: QUIC Relay - SNI-based Reverse Proxy
+      content: QUIC Relay - Reverse Proxy for Hytale
   - - meta
     - property: og:description
-      content: Route multiple Hytale servers through a single IP and port using SNI-based routing.
+      content: Route multiple Hytale servers through a single IP using SNI-based routing and TLS termination.
   - - meta
     - property: og:type
       content: website
@@ -19,11 +19,11 @@ head:
 
 # QUIC Relay
 
-A reverse proxy for routing QUIC connections based on SNI (Server Name Indication). Built for Hytale servers, works with any QUIC-based protocol.
+A QUIC reverse proxy with SNI-based routing and optional TLS termination for protocol inspection and manipulation. Built for Hytale servers, works with any QUIC-based protocol.
 
 ## What it does
 
-The proxy inspects the SNI field in incoming QUIC handshakes and routes connections to different backends based on the hostname. This allows multiple servers to share a single public IP and port.
+Routes connections to backends based on domain (SNI). Optionally terminates TLS for protocol inspection and manipulation. Multiple servers can share a single IP and port.
 
 ```
 ┌──────────────┐                        ┌─────────────────────┐

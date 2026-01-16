@@ -15,7 +15,10 @@
   "listen": ":5520",
   "session_timeout": 600,
   "handlers": [
-    {"type": "handler-name", "config": {...}}
+    {
+      "type": "handler-name",
+      "config": {}
+    }
   ]
 }
 ```
@@ -88,8 +91,15 @@ Forward all traffic to one server:
 {
   "listen": ":5520",
   "handlers": [
-    {"type": "simple-router", "config": {"backend": "10.0.0.1:5520"}},
-    {"type": "forwarder"}
+    {
+      "type": "simple-router",
+      "config": {
+        "backend": "10.0.0.1:5520"
+      }
+    },
+    {
+      "type": "forwarder"
+    }
   ]
 }
 ```
@@ -108,7 +118,9 @@ Distribute traffic across servers:
         "backends": ["10.0.0.1:5520", "10.0.0.2:5520"]
       }
     },
-    {"type": "forwarder"}
+    {
+      "type": "forwarder"
+    }
   ]
 }
 ```
@@ -121,7 +133,12 @@ Route by hostname and limit connections:
 {
   "listen": ":5520",
   "handlers": [
-    {"type": "ratelimit-global", "config": {"max_parallel_connections": 10000}},
+    {
+      "type": "ratelimit-global",
+      "config": {
+        "max_parallel_connections": 10000
+      }
+    },
     {
       "type": "sni-router",
       "config": {
@@ -131,7 +148,9 @@ Route by hostname and limit connections:
         }
       }
     },
-    {"type": "forwarder"}
+    {
+      "type": "forwarder"
+    }
   ]
 }
 ```
@@ -144,9 +163,20 @@ Log all SNI values:
 {
   "listen": ":5520",
   "handlers": [
-    {"type": "logsni"},
-    {"type": "sni-router", "config": {"routes": {"play.example.com": "10.0.0.1:5520"}}},
-    {"type": "forwarder"}
+    {
+      "type": "logsni"
+    },
+    {
+      "type": "sni-router",
+      "config": {
+        "routes": {
+          "play.example.com": "10.0.0.1:5520"
+        }
+      }
+    },
+    {
+      "type": "forwarder"
+    }
   ]
 }
 ```

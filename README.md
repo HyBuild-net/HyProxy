@@ -7,9 +7,9 @@
 
 [![CI](https://github.com/HyBuildNet/quic-relay/actions/workflows/ci.yml/badge.svg)](https://github.com/HyBuildNet/quic-relay/actions/workflows/ci.yml)
 
-A reverse proxy for Hytale servers/Raw QUIC SNI parsing. Route players to different Hytale-Servers based on the domain they connect to.
-According to Hytale's official server guide the "Minecraft"-like SRV implementation is not yet available ([source](https://support.hytale.com/hc/en-us/articles/45326769420827-Hytale-Server-Manual#:~:text=ecosystem-,SRV,exists)).
-And therefore a QUIC-Proxy might be the only convenient way for achieving standard port + multiple servers.
+A QUIC reverse proxy for Hytale servers. Routes connections by domain (SNI) and supports optional TLS termination for protocol inspection and manipulation.
+
+Since Hytale lacks SRV record support ([source](https://support.hytale.com/hc/en-us/articles/45326769420827-Hytale-Server-Manual#:~:text=ecosystem-,SRV,exists)), this proxy enables multiple servers on a single IP and port.
 
 ```mermaid
 flowchart LR
@@ -74,7 +74,7 @@ Routes connections based on the domain (SNI) players connect to.
 }
 ```
 
-> **Note:** The `forwarder` handler contains the actual forwarding logic. This separation allows replacing it with a [terminating proxy](#tls-termination) for protocol inspection.
+> **Note:** The `forwarder` handler contains the actual forwarding logic. This separation allows replacing it with a [terminating proxy](#tls-termination) for protocol inspection/manipulation.
 
 ### Simple Router
 
@@ -158,51 +158,11 @@ For `simple-router`, use `backends` (array) instead of `backend` (string).
 
 ### TLS Termination
 
-The `terminator` handler terminates QUIC TLS and bridges to backend servers. This allows inspection of raw `hytale/1` protocol traffic. Supports per-target certificates for different backends.
+The `terminator` handler terminates QUIC TLS and bridges to backend servers for protocol inspection.
 
-> **Note:** Requires the [HytaleCustomCert](https://hybuildnet.github.io/HytaleCustomCert/) plugin on backend servers with `bypassClientCertificateBinding: true`. This allows the proxy to use the same certificate as the backend server.
+> **Note:** Requires the [HytaleCustomCert](https://hybuildnet.github.io/HytaleCustomCert/) plugin on backend servers.
 
-```json
-{
-  "listen": ":5520",
-  "handlers": [
-    {
-      "type": "sni-router",
-      "config": {
-        "routes": {
-          "play.example.com": "10.0.0.1:5521",
-          "dev.example.com": "10.0.0.2:5522"
-        }
-      }
-    },
-    {
-      "type": "terminator",
-      "config": {
-        "listen": "auto",
-        "certs": {
-          "default": {
-            "cert": "/etc/quic-relay/server.crt",
-            "key": "/etc/quic-relay/server.key"
-          },
-          "targets": {
-            "10.0.0.2:5522": {
-              "cert": "/etc/quic-relay/dev.crt",
-              "key": "/etc/quic-relay/dev.key"
-            }
-          }
-        }
-      }
-    },
-    {
-      "type": "forwarder"
-    }
-  ]
-}
-```
-
-Backend mTLS is enabled by default. Set `"backend_mtls": false` on a target or default to disable.
-
-See [hytale-terminating-proxy](https://github.com/HyBuildNet/hytale-terminating-proxy) for standalone library usage.
+See [docs/tls-termination.md](docs/tls-termination.md) for configuration.
 
 ### Global Config Options
 

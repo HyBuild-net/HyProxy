@@ -58,7 +58,9 @@ Create a config file that routes connections based on SNI:
         }
       }
     },
-    {"type": "forwarder"}
+    {
+      "type": "forwarder"
+    }
   ]
 }
 ```

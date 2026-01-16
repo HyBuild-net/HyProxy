@@ -17,6 +17,8 @@ export default defineConfig({
   ],
 
   themeConfig: {
+    logo: '/logo.png',
+
     nav: [
       { text: 'Documentation', link: '/getting-started' },
       { text: 'GitHub', link: 'https://github.com/HyBuildNet/quic-relay' }
@@ -34,7 +36,8 @@ export default defineConfig({
         text: 'Reference',
         items: [
           { text: 'Handlers', link: '/handlers' },
-          { text: 'Configuration', link: '/configuration' }
+          { text: 'Configuration', link: '/configuration' },
+          { text: 'TLS Termination', link: '/tls-termination' }
         ]
       }
     ],
