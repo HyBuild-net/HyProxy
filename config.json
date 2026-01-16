@@ -20,11 +20,8 @@
             "key": "server.key"
           }
         },
-        "log_client_packets": 0,
-        "log_server_packets": 50,
-        "skip_client_packets": 5,
-        "skip_server_packets": 0,
-        "max_packet_size": 102400
+        "debug": true,
+        "debug_packet_limit": 100
       }
     },
     {"type": "forwarder"}
