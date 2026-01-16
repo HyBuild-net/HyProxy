@@ -160,7 +160,7 @@ For `simple-router`, use `backends` (array) instead of `backend` (string).
 
 The `terminator` handler terminates QUIC TLS and bridges to backend servers for protocol inspection.
 
-> **Note:** Requires the [HytaleCustomCert](https://hybuildnet.github.io/HytaleCustomCert/) plugin on backend servers.
+> **Note:** Requires the [HytaleCustomCert](https://hybuildnet.github.io/HytaleCustomCert/) plugin on backend servers or another workflow to extract the /tmp certs at every runtime.
 
 See [docs/tls-termination.md](docs/tls-termination.md) for configuration.
 
