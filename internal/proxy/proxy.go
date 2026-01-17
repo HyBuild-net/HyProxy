@@ -500,7 +500,7 @@ func (p *Proxy) handlePacket(clientAddr *net.UDPAddr, packet []byte) {
 		// Set DropSession callback for immediate session termination by handlers
 		newCtx.DropSession = func() {
 			p.chain.Load().OnDisconnect(newCtx)
-			p.deleteSession(dcidKey)
+			p.deleteSession(dcidKey, newCtx)
 		}
 	}
 }
@@ -668,7 +668,7 @@ func (p *Proxy) Stop() {
 	p.sessions.Range(func(key, value any) bool {
 		ctx := value.(*handler.Context)
 		p.chain.Load().OnDisconnect(ctx)
-		p.deleteSession(key.(string))
+		p.deleteSession(key.(string), ctx)
 		return true
 	})
 }
@@ -691,7 +691,7 @@ func (p *Proxy) cleanupSessions() {
 					if ctx.Session.IdleDuration() > timeout {
 						log.Printf("[proxy] cleaning up idle session: %s (idle %v)", key, ctx.Session.IdleDuration())
 						p.chain.Load().OnDisconnect(ctx)
-						p.deleteSession(key.(string))
+						p.deleteSession(key.(string), ctx)
 					}
 				}
 				return true
@@ -750,17 +750,16 @@ func (p *Proxy) SessionCount() int {
 
 // deleteSession removes a session and decrements the counter.
 // Note: DCID aliases are cleaned up by timeout-based cleanup.
-func (p *Proxy) deleteSession(key string) {
+func (p *Proxy) deleteSession(key string, ctx *handler.Context) {
 	if _, loaded := p.sessions.LoadAndDelete(key); loaded {
 		p.sessionCount.Add(-1)
 
-		// Clean up clientSessions mapping(s) that point to this session
-		p.clientSessions.Range(func(clientKey, dcidKey any) bool {
-			if dcidKey.(string) == key {
-				p.clientSessions.Delete(clientKey)
+		// O(1) - directly delete using known client address from context
+		if ctx != nil && ctx.Session != nil {
+			if clientAddr := ctx.Session.ClientAddr(); clientAddr != nil {
+				p.clientSessions.Delete(clientAddr.String())
 			}
-			return true
-		})
+		}
 	}
 }
 
@@ -881,7 +880,7 @@ func (p *Proxy) cleanupOldestSessions(n int) {
 		if val, ok := p.sessions.Load(age.key); ok {
 			ctx := val.(*handler.Context)
 			p.chain.Load().OnDisconnect(ctx)
-			p.deleteSession(age.key)
+			p.deleteSession(age.key, ctx)
 			removed++
 		}
 	}

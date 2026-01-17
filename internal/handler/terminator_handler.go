@@ -33,12 +33,9 @@ type TerminatorHandlerConfig struct {
 	// Certificate configurations
 	Certs *TerminatorCertsConfig `json:"certs"`
 
-	// Packet logging settings (per direction)
-	LogClientPackets  int `json:"log_client_packets"`  // Number of client packets to log (0 = disabled)
-	LogServerPackets  int `json:"log_server_packets"`  // Number of server packets to log (0 = disabled)
-	SkipClientPackets int `json:"skip_client_packets"` // Client packets to skip before logging
-	SkipServerPackets int `json:"skip_server_packets"` // Server packets to skip before logging
-	MaxPacketSize     int `json:"max_packet_size"`     // Skip packets larger than this (0 = no limit, default 1MB)
+	// Debug enables packet parsing and logging
+	Debug            bool `json:"debug"`
+	DebugPacketLimit int  `json:"debug_packet_limit"` // Max packets to log per stream (0 = unlimited)
 }
 
 // TerminatorHandler wraps the terminator library as a HyProxy handler.
@@ -56,11 +53,8 @@ func NewTerminatorHandler(raw json.RawMessage) (Handler, error) {
 	// Convert handler config to terminator config
 	termCfg := terminator.Config{
 		Listen:           cfg.Listen,
-		LogClientChunks:  cfg.LogClientPackets,
-		LogServerChunks:  cfg.LogServerPackets,
-		SkipClientChunks: cfg.SkipClientPackets,
-		SkipServerChunks: cfg.SkipServerPackets,
-		MaxChunkSize:     cfg.MaxPacketSize,
+		Debug:            cfg.Debug,
+		DebugPacketLimit: cfg.DebugPacketLimit,
 	}
 
 	// Convert certificate configs
@@ -149,4 +143,10 @@ func (h *TerminatorHandler) OnDisconnect(ctx *Context) {
 // Shutdown gracefully shuts down the terminator.
 func (h *TerminatorHandler) Shutdown(ctx context.Context) error {
 	return h.term.Close()
+}
+
+// AddPacketHandler registers a handler for decrypted Hytale protocol packets.
+// Handlers are executed in the order they are added.
+func (h *TerminatorHandler) AddPacketHandler(handler terminator.PacketHandler) {
+	h.term.AddPacketHandler(handler)
 }
