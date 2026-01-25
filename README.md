@@ -174,7 +174,7 @@ See [docs/tls-termination.md](docs/tls-termination.md) for configuration.
 }
 ```
 
-- `session_timeout` - Idle session timeout in seconds (default: `600` = 10 minutes). Sessions without traffic are cleaned up after this duration. Can be changed via hot-reload (SIGHUP).
+- `session_timeout` - Idle session timeout in seconds (default: `7200` = 2 hours). Sessions without traffic are cleaned up after this duration. Can be changed via hot-reload (SIGHUP).
 
 ### Environment Variables
 

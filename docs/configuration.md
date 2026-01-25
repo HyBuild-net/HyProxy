@@ -49,7 +49,7 @@ Idle timeout in seconds. Sessions without traffic are cleaned up after this dura
 {"session_timeout": 600}
 ```
 
-Default: `600` (10 minutes)
+Default: `7200` (2 hours)
 
 This value can be changed via hot-reload.
 

@@ -261,7 +261,7 @@ type Proxy struct {
 	dcidLengthsMu sync.RWMutex
 }
 
-const defaultSessionTimeout = 600 // 10 minutes in seconds
+const defaultSessionTimeout = 7200 // 2 hours in seconds
 
 // New creates a new proxy instance.
 func New(listenAddr string, chain *handler.Chain) *Proxy {
@@ -278,7 +278,7 @@ func New(listenAddr string, chain *handler.Chain) *Proxy {
 }
 
 // SetSessionTimeout updates the idle session timeout (atomic, hot-reload safe).
-// timeout is in seconds. If <= 0, uses default (600 seconds).
+// timeout is in seconds. If <= 0, uses default (7200 seconds).
 func (p *Proxy) SetSessionTimeout(seconds int) {
 	if seconds <= 0 {
 		seconds = defaultSessionTimeout
